@@ -1,0 +1,13 @@
+.venv/
+models/
+.env
+__pycache__/
+*.pyc
+
+audio/
+.vscode/
+.idea/
+.claude/
+graphify-out/
+.DS_Store
+Thumbs.db
