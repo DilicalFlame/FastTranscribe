@@ -1,0 +1,29 @@
+[project]
+name = "fasttranscribe"
+version = "1.0.0"
+description = "Drop an audio/video file, get a live-streaming transcript (local faster-whisper or Groq cloud)."
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+    "python-dotenv>=1.0",
+    "httpx>=0.27",
+    "numpy>=1.26",
+    "imageio-ffmpeg>=0.5",      # bundled ffmpeg binary, so no system install is required
+    "faster-whisper>=1.1.0",
+    "huggingface-hub>=0.23",
+]
+
+[project.optional-dependencies]
+# NVIDIA GPU runtime libraries (cuBLAS + cuDNN 9 for CUDA 12) as pip wheels.
+# Install with:  uv sync --extra cuda
+# You still need a recent NVIDIA driver; you do NOT need the full CUDA Toolkit.
+cuda = [
+    "nvidia-cublas-cu12<12.9.2; sys_platform == 'win32' or sys_platform == 'linux'",
+    "nvidia-cudnn-cu12>=9,<10; sys_platform == 'win32' or sys_platform == 'linux'",
+]
+
+[tool.uv]
+package = false
