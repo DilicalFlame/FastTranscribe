@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FastTranscribe</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262a33; --text: #e6e8ec; --muted: #8b93a3;
+    --accent: #4f8cff; --ok: #3ccf91; --warn: #f5b53d; --err: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+  .pill { font-size: 12px; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.ok { color: var(--ok); border-color: #285c47; } .pill.warn { color: var(--warn); border-color: #6b5420; }
+  .pill.err { color: var(--err); border-color: #6b2b2b; }
+  .spacer { flex: 1; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { background: transparent; color: var(--muted); border: 0; padding: 7px 14px; cursor: pointer; font: inherit; }
+  .seg button.on { background: var(--accent); color: #fff; }
+  .seg button:disabled { opacity: .4; cursor: not-allowed; }
+  .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  label.f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  select, input[type=text], input[type=password] {
+    background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 10px; font: inherit; width: 100%; }
+  .wide { grid-column: 1 / -1; }
+  #drop { border: 2px dashed #343a46; border-radius: 14px; padding: 42px 16px; text-align: center; cursor: pointer;
+          background: var(--panel); transition: border-color .15s, background .15s; }
+  #drop.over { border-color: var(--accent); background: #18202f; }
+  #drop .big { font-size: 17px; margin-bottom: 4px; } #drop .small { color: var(--muted); font-size: 13px; }
+  #drop.compact { padding: 14px; }
+  .bar { height: 4px; background: var(--line); border-radius: 4px; overflow: hidden; margin: 14px 0 8px; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  .bar.indet > div { width: 30%; animation: slide 1.2s infinite ease-in-out; }
+  @keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+  .stats { font-size: 13px; color: var(--muted); min-height: 20px; }
+  .stats b { color: var(--text); font-weight: 600; }
+  .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 14px 0 8px; }
+  button.btn { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+               padding: 7px 12px; cursor: pointer; font: inherit; font-size: 14px; }
+  button.btn:hover:not(:disabled) { border-color: #3b4252; }
+  button.btn:disabled { opacity: .4; cursor: not-allowed; }
+  button.btn.stop { color: var(--err); }
+  .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; font-size: 14px; }
+  .switch input { display: none; }
+  .switch .t { width: 36px; height: 20px; background: var(--line); border-radius: 99px; position: relative; transition: background .15s; }
+  .switch .t::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+                      background: #fff; transition: left .15s; }
+  .switch input:checked + .t { background: var(--accent); }
+  .switch input:checked + .t::after { left: 18px; }
+  #out { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
+         height: 52vh; min-height: 260px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word; }
+  #out:empty::before { content: "Transcript will stream here as it is processed…"; color: var(--muted); }
+  .line { padding: 2px 0; }
+  .ts { color: var(--accent); font-variant-numeric: tabular-nums; font-size: 13px; margin-right: 10px; user-select: none; }
+  #out.nots .ts { display: none; }
+  #out.nots .line { display: inline; } #out.nots .line::after { content: " "; }
+  .msg { font-size: 13px; margin-top: 8px; min-height: 18px; }
+  .msg.err { color: var(--err); } .msg.warn { color: var(--warn); }
+  details { margin-bottom: 14px; } summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .hint { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>FastTranscribe</h1>
+    <span id="engPill" class="pill">checking…</span>
+    <span class="spacer"></span>
+    <div class="seg" id="engineSeg">
+      <button data-engine="local">Local</button>
+      <button data-engine="groq">Online (Groq)</button>
+    </div>
+  </header>
+
+  <div class="opts">
+    <label class="f" id="modelBox">Local model
+      <select id="model"></select>
+    </label>
+    <label class="f">Language
+      <select id="language">
+        <option value="">Auto-detect</option>
+        <option value="hi">Hindi / Hinglish</option>
+        <option value="en">English</option>
+      </select>
+    </label>
+    <label class="f">Noisy-audio clean-up
+      <span class="switch" style="height:38px"><input type="checkbox" id="enhance" checked><span class="t"></span><span>Enhance audio</span></span>
+    </label>
+    <label class="f wide">Vocabulary / context prompt <span class="hint">— names, product terms, or a sample Hinglish sentence to steer spelling &amp; script</span>
+      <input type="text" id="prompt" placeholder="e.g. Haan toh, let's start the standup. Rahul, Priya, Kubernetes, sprint review…">
+    </label>
+  </div>
+
+  <details id="settings">
+    <summary>Groq API key</summary>
+    <div style="margin-top:8px">
+      <input type="password" id="groqKey" placeholder="gsk_… (optional if GROQ_API_KEY is in .env) — stored only in this browser">
+      <div class="hint" style="margin-top:4px">Free key: console.groq.com → API Keys.</div>
+    </div>
+  </details>
+
+  <div id="drop">
+    <div class="big">Drop an audio or video file here</div>
+    <div class="small">or click to choose · mp3, wav, m4a, ogg, mp4, mkv, webm, mov… (video → audio track only)</div>
+    <input type="file" id="file" accept="audio/*,video/*" hidden>
+  </div>
+
+  <div class="bar" id="bar"><div></div></div>
+  <div class="stats" id="stats"></div>
+  <div class="msg" id="msg"></div>
+
+  <div class="toolbar">
+    <button class="btn stop" id="stopBtn" disabled>■ Stop</button>
+    <span class="spacer"></span>
+    <label class="switch"><input type="checkbox" id="hideTs"><span class="t"></span><span>Hide timestamps</span></label>
+    <button class="btn" id="copyBtn" disabled>Copy</button>
+    <button class="btn" id="exportBtn" disabled>Export .srt</button>
+  </div>
+
+  <div id="out"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const store = {
+  get: (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+};
+
+let status = null, engine = store.get("ft.engine", "local");
+let segments = [], duration = 0, startedAt = 0, controller = null, timer = null, autoScroll = true, fileName = "transcript";
+
+// ---------------------------------------------------------------- settings / status
+["language", "prompt", "groqKey"].forEach((id) => {
+  $(id).value = store.get("ft." + id, $(id).value);
+  $(id).addEventListener("change", () => store.set("ft." + id, $(id).value));
+});
+$("enhance").checked = store.get("ft.enhance", "true") === "true";
+$("enhance").addEventListener("change", () => store.set("ft.enhance", $("enhance").checked));
+$("hideTs").checked = store.get("ft.hideTs", "false") === "true";
+
+async function refreshStatus() {
+  try {
+    status = await (await fetch("/api/status")).json();
+  } catch { setPill("server offline", "err"); return; }
+  const L = status.local;
+  const sel = $("model");
+  if (!sel.options.length) {
+    for (const p of L.presets) {
+      const o = document.createElement("option");
+      o.value = p.key; o.textContent = p.label; o.title = p.note;
+      sel.appendChild(o);
+    }
+    sel.value = store.get("ft.model", L.default_model);
+    if (!sel.value) sel.value = L.presets[0].key;
+  }
+  for (const o of sel.options) {
+    const p = L.presets.find((x) => x.key === o.value);
+    o.textContent = p.label + (p.downloaded ? "" : "  (downloads on first use)");
+  }
+  $("engineSeg").querySelector('[data-engine="local"]').disabled = !L.available;
+  if (!L.available && engine === "local") engine = "groq";
+  renderEngine();
+  if (L.status === "loading") setTimeout(refreshStatus, 1500);
+}
+
+function setPill(text, cls) { const p = $("engPill"); p.textContent = text; p.className = "pill " + (cls || ""); }
+
+function renderEngine() {
+  document.querySelectorAll("#engineSeg button").forEach((b) => b.classList.toggle("on", b.dataset.engine === engine));
+  $("modelBox").style.display = engine === "local" ? "" : "none";
+  if (!status) return;
+  if (engine === "local") {
+    const L = status.local;
+    if (!L.available) setPill("local engine unavailable", "err");
+    else if (L.status === "loading") setPill("loading model…", "warn");
+    else if (L.status === "error") setPill("model error", "err");
+    else if (L.status === "ready") setPill(`${L.model} · ${L.device}/${L.compute_type}`, L.device === "cuda" ? "ok" : "warn");
+    else setPill(L.cuda_devices > 0 ? "GPU detected · model loads on first use" : "no GPU detected · CPU mode", L.cuda_devices > 0 ? "" : "warn");
+    if (L.note) showMsg(L.note, "warn"); else if (L.status === "error") showMsg(L.error, "err");
+  } else {
+    const G = status.groq, has = G.configured || $("groqKey").value.trim();
+    setPill(has ? `Groq · ${G.model}` : "Groq · add API key", has ? "ok" : "warn");
+    if (!has) $("settings").open = true;
+  }
+}
+
+$("engineSeg").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b || b.disabled) return;
+  engine = b.dataset.engine; store.set("ft.engine", engine); showMsg(""); renderEngine();
+});
+$("model").addEventListener("change", () => store.set("ft.model", $("model").value));
+$("groqKey").addEventListener("input", renderEngine);
+
+// ---------------------------------------------------------------- file input
+const drop = $("drop");
+drop.addEventListener("click", () => !controller && $("file").click());
+$("file").addEventListener("change", (e) => e.target.files[0] && start(e.target.files[0]));
+["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f && !controller) start(f); });
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("drop", (e) => e.preventDefault());
+
+// ---------------------------------------------------------------- transcription
+async function start(file) {
+  segments = []; duration = 0; $("out").innerHTML = ""; autoScroll = true;
+  fileName = file.name.replace(/\.[^.]+$/, "") || "transcript";
+  showMsg(""); setBusy(true);
+  drop.querySelector(".big").textContent = file.name;
+  drop.querySelector(".small").textContent = `${(file.size / 1048576).toFixed(1)} MB · uploading…`;
+  setBar(null); startedAt = performance.now(); tick(); timer = setInterval(tick, 500);
+
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("engine", engine);
+  fd.append("model", $("model").value);
+  fd.append("language", $("language").value);
+  fd.append("prompt", $("prompt").value);
+  fd.append("enhance", $("enhance").checked);
+  fd.append("groq_key", $("groqKey").value.trim());
+
+  controller = new AbortController();
+  try {
+    const res = await fetch("/api/transcribe", { method: "POST", body: fd, signal: controller.signal });
+    if (!res.ok || !res.body) throw new Error(`Server returned ${res.status}`);
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+        if (line) handle(JSON.parse(line));
+      }
+    }
+  } catch (e) {
+    if (e.name === "AbortError") showMsg("Stopped. Partial transcript kept.", "warn");
+    else showMsg(e.message, "err");
+  } finally {
+    controller = null; clearInterval(timer); tick(); setBusy(false);
+    drop.querySelector(".small").textContent = "Drop another file to transcribe again";
+    refreshStatus();
+  }
+}
+
+let lastPos = 0, finalStats = null, info = {};
+function handle(ev) {
+  switch (ev.type) {
+    case "status": drop.querySelector(".small").textContent = ev.message; break;
+    case "meta": duration = ev.duration; lastPos = 0; finalStats = null; info = {}; setBar(0); break;
+    case "engine":
+      info.engine = ev.engine === "local" ? `${ev.model} · ${ev.device}/${ev.compute_type}` : `Groq · ${ev.model}`;
+      if (ev.note) showMsg(ev.note, "warn");
+      refreshStatus(); break;
+    case "info": info.lang = `${ev.language} (${Math.round(ev.language_probability * 100)}%)`; break;
+    case "segment": addSegment(ev); lastPos = Math.max(lastPos, ev.end); setBar(lastPos / duration); break;
+    case "progress": lastPos = Math.max(lastPos, ev.position); setBar(lastPos / duration); break;
+    case "error": showMsg(ev.message, "err"); break;
+    case "done": finalStats = ev; lastPos = duration; setBar(1);
+      if (!segments.length) showMsg("No speech found in this file.", "warn"); break;
+  }
+}
+
+function addSegment(s) {
+  segments.push(s);
+  const out = $("out");
+  const near = out.scrollHeight - out.scrollTop - out.clientHeight < 60;
+  const d = document.createElement("div");
+  d.className = "line";
+  const ts = document.createElement("span"); ts.className = "ts"; ts.textContent = `[${clock(s.start)}]`;
+  d.appendChild(ts); d.appendChild(document.createTextNode(s.text));
+  out.appendChild(d);
+  if (near || autoScroll) out.scrollTop = out.scrollHeight;
+  autoScroll = false;
+  $("copyBtn").disabled = $("exportBtn").disabled = false;
+}
+
+function tick() {
+  if (!startedAt) return;
+  const el = finalStats ? finalStats.elapsed : (performance.now() - startedAt) / 1000;
+  const parts = [];
+  if (duration) parts.push(`<b>${clock(lastPos)}</b> / ${clock(duration)}`);
+  parts.push(`elapsed <b>${el.toFixed(1)}s</b>`);
+  const speed = finalStats ? finalStats.speed : (lastPos > 0 ? lastPos / el : 0);
+  if (speed) parts.push(`<b>${speed.toFixed(1)}×</b> realtime`);
+  if (duration && !finalStats && speed > 0) parts.push(`~${Math.max(0, (duration - lastPos) / speed).toFixed(0)}s left`);
+  if (info.engine) parts.push(info.engine);
+  if (info.lang) parts.push(`lang ${info.lang}`);
+  $("stats").innerHTML = parts.join(" · ");
+}
+
+function setBar(frac) {
+  const bar = $("bar");
+  if (frac === null) { bar.classList.add("indet"); bar.firstElementChild.style.width = ""; return; }
+  bar.classList.remove("indet");
+  bar.firstElementChild.style.width = `${Math.min(100, Math.max(0, frac * 100))}%`;
+}
+
+function setBusy(b) {
+  $("stopBtn").disabled = !b;
+  drop.classList.toggle("compact", b || segments.length > 0);
+  document.querySelectorAll("#engineSeg button, #model, #language, #enhance, #prompt").forEach((el) => {
+    if (el.dataset.engine === "local" && status && !status.local.available) return;
+    el.disabled = b;
+  });
+  if (!b) renderEngine();
+}
+
+function showMsg(text, cls) { const m = $("msg"); m.textContent = text || ""; m.className = "msg " + (cls || ""); }
+
+$("stopBtn").addEventListener("click", () => controller && controller.abort());
+
+// ---------------------------------------------------------------- timestamps + export
+function applyTs() {
+  const hide = $("hideTs").checked;
+  $("out").classList.toggle("nots", hide);
+  $("exportBtn").textContent = hide ? "Export .txt" : "Export .srt";
+  store.set("ft.hideTs", hide);
+}
+$("hideTs").addEventListener("change", applyTs); applyTs();
+
+function clock(t) {
+  t = Math.max(0, t || 0);
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = Math.floor(t % 60);
+  const mm = String(m).padStart(2, "0"), ss = String(s).padStart(2, "0");
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+function srtTime(t) {
+  const ms = Math.round(Math.max(0, t) * 1000);
+  const h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60, s = Math.floor(ms / 1000) % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")},${String(ms % 1000).padStart(3, "0")}`;
+}
+const toSrt = () => segments.map((s, i) => `${i + 1}\n${srtTime(s.start)} --> ${srtTime(s.end)}\n${s.text}\n`).join("\n");
+const toTxt = () => {
+  // plain text in readable paragraphs: break where the speaker paused > 1.5 s
+  let out = "", prev = null;
+  for (const s of segments) {
+    out += prev === null ? "" : (s.start - prev > 1.5 ? "\n\n" : " ");
+    out += s.text; prev = s.end;
+  }
+  return out.trim() + "\n";
+};
+
+function download(name, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+  const a = Object.assign(document.createElement("a"), { href: url, download: name });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+$("exportBtn").addEventListener("click", () => {
+  if ($("hideTs").checked) download(`${fileName}.txt`, toTxt());
+  else download(`${fileName}.srt`, toSrt());
+});
+$("copyBtn").addEventListener("click", async () => {
+  const text = $("hideTs").checked ? toTxt() : segments.map((s) => `[${clock(s.start)}] ${s.text}`).join("\n");
+  try { await navigator.clipboard.writeText(text); showMsg("Copied to clipboard."); }
+  catch { showMsg("Clipboard blocked by the browser; use Export instead.", "warn"); }
+});
+
+refreshStatus();
+</script>
+</body>
+</html>
